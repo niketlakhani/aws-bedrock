@@ -47,32 +47,29 @@ def _eta_days(delivery_date: str) -> int:
     return max(0, (parsed - datetime(2026, 6, 12)).days)
 
 
-# FIX: guard for a missing/None customer and fall back to the standard
-#   rate instead of assuming an address is present.
+# BUG: reads `customer["address"]` without checking that `customer` exists.
+# ROOT CAUSE: guest checkouts send `"customer": null`, so `order["customer"]`
+#   is None and subscripting it raises `TypeError: 'NoneType' object is not
+#   subscriptable`.
+# FIX HINT: guard for a missing/None customer and fall back to the standard
+#   rate (or return a 400) instead of assuming an address is present.
 def quote_shipping(order: dict) -> dict:
     customer = order["customer"]
-
-    # Guest checkouts send `"customer": null` — no address is available.
-    # Fall back to the standard shipping rate rather than crashing.
-    if not customer:
+    if customer is None:
         logger.warning(
             json.dumps(
                 {
                     "event": "quote.guest_checkout",
-                    "message": "order has no customer; falling back to standard rate",
+                    "message": "customer is null; falling back to standard shipping rate",
                     "orderId": order.get("id"),
                 }
             )
         )
-        return {
-            "orderId": order.get("id"),
-            "city": "unknown",
-            "shipping": SHIPPING_RATES["standard"],
-            "etaDays": _eta_days(order.get("deliveryDate", "2026-06-20")),
-        }
-
-    city = customer["address"]["city"]
-    rate = _resolve_rate(city)
+        rate = SHIPPING_RATES["standard"]
+        city = None
+    else:
+        city = customer["address"]["city"]
+        rate = _resolve_rate(city)
     eta = _eta_days(order.get("deliveryDate", "2026-06-20"))
     return {
         "orderId": order.get("id"),
@@ -89,7 +86,7 @@ def handler(event, context):
         {"id": "ord_42", "customer": {"address": {"city": "London"}}}
 
     Guest checkouts arrive as:
-        {"id": "ord_43", "customer": null}   <-- previously triggered the bug
+        {"id": "ord_43", "customer": null}   <-- triggers the bug
     """
     # API Gateway delivers the order in `body` as a JSON string; direct
     # invocations pass the order as the event itself.
