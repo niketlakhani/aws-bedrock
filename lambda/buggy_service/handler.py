@@ -47,14 +47,27 @@ def _eta_days(delivery_date: str) -> int:
     return max(0, (parsed - datetime(2026, 6, 12)).days)
 
 
-# FIX: guard for missing/None customer (guest checkouts send `"customer": null`).
-# ROOT CAUSE was: `customer["address"]` raised TypeError when customer was None.
+# BUG: reads `customer["address"]` without checking that `customer` exists.
+# ROOT CAUSE: guest checkouts send `"customer": null`, so `order["customer"]`
+#   is None and subscripting it raises `TypeError: 'NoneType' object is not
+#   subscriptable`.
+# FIX HINT: guard for a missing/None customer and fall back to the standard
+#   rate (or return a 400) instead of assuming an address is present.
 def quote_shipping(order: dict) -> dict:
-    customer = order.get("customer")
-    if not customer or not customer.get("address"):
-        # Guest checkout — no address available; fall back to standard rate.
-        city = "unknown"
+    customer = order["customer"]
+    if customer is None:
+        order_id = order.get("id")
+        logger.warning(
+            json.dumps(
+                {
+                    "event": "quote.guest_checkout",
+                    "message": "customer is null; falling back to standard shipping rate",
+                    "orderId": order_id,
+                }
+            )
+        )
         rate = SHIPPING_RATES["standard"]
+        city = None
     else:
         city = customer["address"]["city"]
         rate = _resolve_rate(city)
@@ -74,7 +87,7 @@ def handler(event, context):
         {"id": "ord_42", "customer": {"address": {"city": "London"}}}
 
     Guest checkouts arrive as:
-        {"id": "ord_43", "customer": null}   <-- previously triggered the bug
+        {"id": "ord_43", "customer": null}   <-- triggers the bug
     """
     # API Gateway delivers the order in `body` as a JSON string; direct
     # invocations pass the order as the event itself.
