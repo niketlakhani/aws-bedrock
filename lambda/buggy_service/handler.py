@@ -35,15 +35,24 @@ def _resolve_rate(city: str) -> float:
     return SHIPPING_RATES["domestic"]
 
 
-# BUG: reads `customer["address"]` without checking that `customer` exists.
-# ROOT CAUSE: guest checkouts send `"customer": null`, so `order["customer"]`
-#   is None and subscripting it raises `TypeError: 'NoneType' object is not
-#   subscriptable`.
-# FIX HINT: guard for a missing/None customer and fall back to the standard
-#   rate (or return a 400) instead of assuming an address is present.
+# FIX: guard for a missing/None customer and fall back to the standard
+#   rate instead of assuming an address is present.
+# ROOT CAUSE (fixed): guest checkouts send `"customer": null`, so
+#   `order["customer"]` was None and subscripting it raised
+#   `TypeError: 'NoneType' object is not subscriptable`.
 def quote_shipping(order: dict) -> dict:
-    customer = order["customer"]
-    city = customer["address"]["city"]
+    customer = order.get("customer") or {}
+    address = customer.get("address") or {}
+    city = address.get("city")
+
+    if not city:
+        # No address on record (e.g. guest checkout) — fall back to standard rate.
+        return {
+            "orderId": order.get("id"),
+            "city": None,
+            "shipping": SHIPPING_RATES["standard"],
+        }
+
     rate = _resolve_rate(city)
     return {
         "orderId": order.get("id"),
@@ -59,7 +68,7 @@ def handler(event, context):
         {"id": "ord_42", "customer": {"address": {"city": "London"}}}
 
     Guest checkouts arrive as:
-        {"id": "ord_43", "customer": null}   <-- triggers the bug
+        {"id": "ord_43", "customer": null}   <-- previously triggered the bug
     """
     # API Gateway delivers the order in `body` as a JSON string; direct
     # invocations pass the order as the event itself.
