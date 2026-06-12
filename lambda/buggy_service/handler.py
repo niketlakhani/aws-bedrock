@@ -36,14 +36,28 @@ def _resolve_rate(city: str) -> float:
     return SHIPPING_RATES["domestic"]
 
 
-# BUG B: parses the delivery date with a strict format and no error handling.
-# ROOT CAUSE: a malformed date like "2026-13-40" (month 13, day 40) makes
-#   datetime.strptime raise `ValueError: unconverted data` / `time data ... does
-#   not match format`, crashing the order.
-# FIX HINT: validate the date and reject/normalise bad input instead of letting
-#   strptime raise.
-def _eta_days(delivery_date: str) -> int:
-    parsed = datetime.strptime(delivery_date, "%Y-%m-%d")
+# BUG B (FIXED): parses the delivery date with a strict format and no error
+# handling.  A malformed date like "2026-13-40" (month 13, day 40) used to
+# make datetime.strptime raise `ValueError`, crashing the order.
+# FIX: catch ValueError, log a warning with the order ID, and fall back to 0.
+def _eta_days(delivery_date: str, order_id: str = None) -> int:
+    try:
+        parsed = datetime.strptime(delivery_date, "%Y-%m-%d")
+    except ValueError:
+        logger.warning(
+            json.dumps(
+                {
+                    "event": "quote.invalid_delivery_date",
+                    "orderId": order_id,
+                    "deliveryDate": delivery_date,
+                    "message": (
+                        "deliveryDate could not be parsed as YYYY-MM-DD; "
+                        "defaulting etaDays to 0"
+                    ),
+                }
+            )
+        )
+        return 0
     return max(0, (parsed - datetime(2026, 6, 12)).days)
 
 
@@ -57,7 +71,7 @@ def quote_shipping(order: dict) -> dict:
     customer = order["customer"]
     city = customer["address"]["city"]
     rate = _resolve_rate(city)
-    eta = _eta_days(order.get("deliveryDate", "2026-06-20"))
+    eta = _eta_days(order.get("deliveryDate", "2026-06-20"), order_id=order.get("id"))
     return {
         "orderId": order.get("id"),
         "city": city,
