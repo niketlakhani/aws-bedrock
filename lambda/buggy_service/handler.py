@@ -55,6 +55,15 @@ def quote_shipping(order: dict) -> dict:
     # Guest checkouts send `"customer": null` — no address is available.
     # Fall back to the standard shipping rate rather than crashing.
     if not customer:
+        logger.warning(
+            json.dumps(
+                {
+                    "event": "quote.guest_checkout",
+                    "message": "order has no customer; falling back to standard rate",
+                    "orderId": order.get("id"),
+                }
+            )
+        )
         return {
             "orderId": order.get("id"),
             "city": "unknown",
