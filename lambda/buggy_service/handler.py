@@ -47,23 +47,29 @@ def _eta_days(delivery_date: str) -> int:
     return max(0, (parsed - datetime(2026, 6, 12)).days)
 
 
-# BUG: reads `customer["address"]` without checking that `customer` exists.
-# ROOT CAUSE: guest checkouts send `"customer": null`, so `order["customer"]`
-#   is None and subscripting it raises `TypeError: 'NoneType' object is not
-#   subscriptable`.
-# FIX HINT: guard for a missing/None customer and fall back to the standard
-#   rate (or return a 400) instead of assuming an address is present.
+# FIX (inc-0850c152): guard for a missing/None customer and fall back to the
+# standard rate instead of assuming an address is always present.
 def quote_shipping(order: dict) -> dict:
-    customer = order["customer"]
-    city = customer["address"]["city"]
-    rate = _resolve_rate(city)
+    customer = order.get("customer")
+    city = None
+    if customer is not None:
+        address = customer.get("address") or {}
+        city = address.get("city")
+
+    if city:
+        rate = _resolve_rate(city)
+    else:
+        rate = SHIPPING_RATES["standard"]
+
     eta = _eta_days(order.get("deliveryDate", "2026-06-20"))
-    return {
+    result = {
         "orderId": order.get("id"),
-        "city": city,
         "shipping": rate,
         "etaDays": eta,
     }
+    if city:
+        result["city"] = city
+    return result
 
 
 def handler(event, context):
