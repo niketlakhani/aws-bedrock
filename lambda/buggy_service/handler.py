@@ -15,6 +15,7 @@ verify the agent reached the right conclusion.
 import json
 import logging
 import traceback
+from datetime import datetime
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -35,6 +36,17 @@ def _resolve_rate(city: str) -> float:
     return SHIPPING_RATES["domestic"]
 
 
+# BUG B: parses the delivery date with a strict format and no error handling.
+# ROOT CAUSE: a malformed date like "2026-13-40" (month 13, day 40) makes
+#   datetime.strptime raise `ValueError: unconverted data` / `time data ... does
+#   not match format`, crashing the order.
+# FIX HINT: validate the date and reject/normalise bad input instead of letting
+#   strptime raise.
+def _eta_days(delivery_date: str) -> int:
+    parsed = datetime.strptime(delivery_date, "%Y-%m-%d")
+    return max(0, (parsed - datetime(2026, 6, 12)).days)
+
+
 # BUG: reads `customer["address"]` without checking that `customer` exists.
 # ROOT CAUSE: guest checkouts send `"customer": null`, so `order["customer"]`
 #   is None and subscripting it raises `TypeError: 'NoneType' object is not
@@ -45,10 +57,12 @@ def quote_shipping(order: dict) -> dict:
     customer = order["customer"]
     city = customer["address"]["city"]
     rate = _resolve_rate(city)
+    eta = _eta_days(order.get("deliveryDate", "2026-06-20"))
     return {
         "orderId": order.get("id"),
         "city": city,
         "shipping": rate,
+        "etaDays": eta,
     }
 
 
