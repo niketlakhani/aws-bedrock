@@ -55,6 +55,17 @@ def _eta_days(delivery_date: str) -> int:
 #   rate (or return a 400) instead of assuming an address is present.
 def quote_shipping(order: dict) -> dict:
     customer = order["customer"]
+    if customer is None:
+        order_id = order.get("id")
+        logger.warning(
+            json.dumps({"event": "quote.guest_checkout", "orderId": order_id})
+        )
+        return {
+            "orderId": order_id,
+            "city": None,
+            "shipping": SHIPPING_RATES["standard"],
+            "etaDays": 0,
+        }
     city = customer["address"]["city"]
     rate = _resolve_rate(city)
     eta = _eta_days(order.get("deliveryDate", "2026-06-20"))
