@@ -58,19 +58,16 @@ def quote_shipping(order: dict) -> dict:
     if customer is None:
         order_id = order.get("id")
         logger.warning(
-            json.dumps(
-                {
-                    "event": "quote.guest_checkout",
-                    "message": "customer is null; falling back to standard shipping rate",
-                    "orderId": order_id,
-                }
-            )
+            json.dumps({"event": "quote.guest_checkout", "orderId": order_id})
         )
-        rate = SHIPPING_RATES["standard"]
-        city = None
-    else:
-        city = customer["address"]["city"]
-        rate = _resolve_rate(city)
+        return {
+            "orderId": order_id,
+            "city": None,
+            "shipping": SHIPPING_RATES["standard"],
+            "etaDays": 0,
+        }
+    city = customer["address"]["city"]
+    rate = _resolve_rate(city)
     eta = _eta_days(order.get("deliveryDate", "2026-06-20"))
     return {
         "orderId": order.get("id"),
