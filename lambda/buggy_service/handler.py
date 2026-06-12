@@ -36,14 +36,17 @@ def _resolve_rate(city: str) -> float:
     return SHIPPING_RATES["domestic"]
 
 
-# BUG B: parses the delivery date with a strict format and no error handling.
-# ROOT CAUSE: a malformed date like "2026-13-40" (month 13, day 40) makes
-#   datetime.strptime raise `ValueError: unconverted data` / `time data ... does
-#   not match format`, crashing the order.
-# FIX HINT: validate the date and reject/normalise bad input instead of letting
-#   strptime raise.
+# FIX (inc-11bcab0a): wrap strptime in a try/except so that a malformed
+# deliveryDate (e.g. "2026-13-40") does not crash the whole order.
+# Instead we log a warning and return 0 ETA days as a safe fallback.
 def _eta_days(delivery_date: str) -> int:
-    parsed = datetime.strptime(delivery_date, "%Y-%m-%d")
+    try:
+        parsed = datetime.strptime(delivery_date, "%Y-%m-%d")
+    except ValueError:
+        logger.warning(
+            json.dumps({"event": "eta.badDate", "deliveryDate": delivery_date})
+        )
+        return 0
     return max(0, (parsed - datetime(2026, 6, 12)).days)
 
 
